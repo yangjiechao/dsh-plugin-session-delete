@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session log deletion",
+    "description": "Adds a session-menu action with an irreversible-action warning, scope disclosure, checkbox and typed DELETE confirmation. Only archived, unloaded current V4 JSONL sessions are supported; running sessions are never stopped or deleted automatically. Removes all local log generations but retains shared attachments, search/projection caches, backups, copies in other sessions and cloud memory. Not a privacy eraser. See the README for usage."
+  }
+}
