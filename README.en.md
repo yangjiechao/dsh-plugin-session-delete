@@ -2,7 +2,7 @@
 
 [中文](README.md) · MIT · No runtime dependencies or build step
 
-Adds **Permanently delete logs…** to a DeepSeek Harness session menu. A warning dialog discloses the scope and requires a checkbox plus typed `DELETE`. Cancelling does not delete logs.
+Adds **Permanently delete logs…** to a DeepSeek Harness session menu. A warning dialog discloses the scope and requires a scope checkbox plus an explicit click on **Permanently delete logs**; no typed confirmation is required. Cancelling does not delete logs.
 
 > **A local session-log maintenance tool, not a privacy eraser or official DSH deletion API.** Test with disposable sessions first. Deletion cannot be undone by this plugin.
 
@@ -16,13 +16,15 @@ Install from GitHub with `plugin_manager action=install_bundle target=github:yan
 
 ## Use
 
-1. Archive the target session. Switch away and do not reopen it.
-2. Close other DSH processes sharing this store. If the target is still loaded, save other work and restart DSH, then use its archived row **without opening it**.
+1. **No manual archive is needed.** Use the unloaded target’s session menu directly without opening its contents.
+2. Close other DSH processes sharing this store. If the target is still loaded, save other work and restart DSH, then use its menu **without opening it**.
 3. Choose **Permanently delete logs…** from the session's `…` menu.
-4. Check the captured title, exact ID, file count, estimated bytes, and limitations. Tick the acknowledgment, type `DELETE`, and confirm.
-5. Wait for the result. Confirmations expire after two minutes or a log change. A failed attempt consumes its token; inspect afresh. Refresh manually if needed; stale workspace header indexes can require a DSH restart.
+4. Check the captured title, exact ID, file count, estimated bytes, and limitations. Tick the scope acknowledgment (including automatic archival), then explicitly click **Permanently delete logs**. No confirmation text is needed.
+5. Wait for the result. Strictly verified success with no warnings automatically closes the dialog without reloading the page. Warnings, partial failures and uncertain outcomes stay visible. Confirmations expire after two minutes or a log change. A failed attempt consumes its token; inspect afresh. Refresh manually if needed; stale workspace header indexes can require a DSH restart.
 
-The plugin never forcibly stops or unloads a live session. Deletion is not recursive. Parent sessions with known children must be handled leaf-first.
+Preview is read-only. Only after explicit confirmation does the plugin call public `workspaceRegistry.archiveSession(id)` without `stopActivity`, revalidate, and acquire the write lock. Activity admission rejects running work. If a later deletion step fails, the target may remain archived; inspect again rather than assuming rollback.
+
+**Current or loaded sessions remain unsupported.** Installed DSH exposes `AgentHandle.dispose()` only to its owning creator; `agents.get()` returns a bare Agent and the Controller offers no public safe unload endpoint. This plugin does not access private fields, unload the entire Controller, or terminate the current conversation. Switch away and restart DSH without reopening the target, then use its menu. The plugin never forcibly stops or unloads a live session. Deletion is not recursive. Parent sessions with known children must be handled leaf-first.
 
 ## What is deleted
 

@@ -41,8 +41,19 @@ for (const compression of ['none', 'zstd']) {
     const initial = await first.stat(id);
     assert.equal(initial.formatStatus, 'current');
     const dir = path.dirname(initial.location.path);
-    const core = new SessionDeletion({ persistence: first, isArchived: () => true, isLive: () => false,
-      liveHeaders: () => [], workspaces: () => [] }, { async unlink(file) {
+    const Storage = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-storage')).href);
+    const StorageJson = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-storage-json')).href);
+    const StorageDomain = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-storage-domain')).href);
+    const Workspace = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-workspace')).href);
+    await a.plugin(Storage.default).await();
+    await a.plugin(StorageJson, { root: path.join(temporary, 'storage') }).await();
+    await a.plugin(StorageDomain, { backend: 'json' }).await();
+    await a.plugin(Workspace.default).await();
+    const workspace = a.workspaceRegistry;
+    let archives = 0;
+    const core = new SessionDeletion({ persistence: first, isArchived: () => workspace.archivedSessionIds.includes(id), isLive: () => false,
+      archive: async () => { archives++; await workspace.archiveSession(id); },
+      liveHeaders: () => [], workspaces: () => workspace.list() }, { async unlink(file) {
       assert.equal(path.dirname(file), dir);
       // A different real backend instance must be locked out during unlink.
       await assert.rejects(second.open(id, 'write'), error => error.code === 'SESSION_ALREADY_OWNED' || error.name === 'SessionAlreadyOwnedError');
@@ -69,8 +80,17 @@ for (const compression of ['none', 'zstd']) {
     } });
     t.after(() => core.close());
     const before = await core.prepare(id, 'owner-test');
-    const output = await core.remove({ sessionId: id, token: before.token, confirmText: 'DELETE', acknowledgeLimits: true }, 'owner-test');
-    assert.equal(output.deleted, true);
+    const removeActivity = a.on('workspace/session-activity', async (_request, next) => [{ kind: 'turn' }, ...await next()]);
+    await assert.rejects(core.remove({ sessionId: id, token: before.token, confirmDeletion: true, acknowledgeLimits: true }, 'owner-test'), error => error.code === 'ARCHIVE_FAILED');
+    removeActivity();
+    assert.equal(workspace.archivedSessionIds.includes(id), false);
+    assert.ok(await first.stat(id));
+    archives = 0;
+    const confirmed = await core.prepare(id, 'owner-test');
+    assert.equal(archives, 0); assert.equal(workspace.archivedSessionIds.includes(id), false);
+    const output = await core.remove({ sessionId: id, token: confirmed.token, confirmDeletion: true, acknowledgeLimits: true }, 'owner-test');
+    assert.equal(output.deleted, true); assert.equal(archives, 1); assert.equal(workspace.archivedSessionIds.includes(id), true);
+    assert.equal(workspace.list().some(item => item.sessionIds.includes(id)), false);
     assert.equal(output.fileCount, 1);
     assert.deepEqual(output.warnings, []);
     assert.equal(await first.stat(id), undefined);

@@ -1,6 +1,6 @@
 import { DeleteError, SessionDeletion, validateId } from './deletion.js';
 
-export const inject = ['connection', 'sessionPersistence', 'sessions', 'agents', 'workspaceRegistry'];
+export const inject = ['connection', 'webServer', 'sessionPersistence', 'sessions', 'agents', 'workspaceRegistry'];
 export const name = 'session-delete';
 const CHANNEL = '/session-delete';
 function object(value, keys) {
@@ -19,6 +19,7 @@ export function apply(ctx) {
   const core = new SessionDeletion({
     persistence: ctx.sessionPersistence,
     isArchived: id => ctx.workspaceRegistry.archivedSessionIds.includes(id),
+    archive: id => ctx.workspaceRegistry.archiveSession(id),
     isLive: id => Boolean(ctx.agents.get(id) || ctx.sessions.get(id)),
     liveHeaders: () => ctx.sessions.list().map(s => s.header),
     workspaces: () => ctx.workspaceRegistry.list(),
@@ -30,7 +31,10 @@ export function apply(ctx) {
     if (session.header?.parentSession) core.guard(session.header.parentSession);
   });
   ctx.on('workspace/session-unarchiving', ({ sessionId }) => core.guard(sessionId));
-  ctx.connection.rpc.handle(CHANNEL, async (endpoint, payload, signal, peer) => {
+  // Pass the real consumer Context explicitly. rpc.handle captures a Cordis
+  // shadow Context whose service lookup is attributed to the connection provider.
+  // That provider does not inject webServer, even though this plugin does.
+  ctx.connection.register(ctx, CHANNEL, async (endpoint, payload, signal, peer) => {
     try {
       if (peer.principal.kind !== 'owner') throw new DeleteError('FORBIDDEN', 'Only the owner may delete logs. / 仅所有者可以删除日志。');
       const combined = AbortSignal.any([signal, peer.signal]);
@@ -40,7 +44,7 @@ export function apply(ctx) {
         return { ok: true, value: await core.prepare(validateId(payload.sessionId), peer.id, combined) };
       }
       if (endpoint === 'remove') {
-        object(payload, ['sessionId', 'token', 'confirmText', 'acknowledgeLimits']);
+        object(payload, ['sessionId', 'token', 'confirmDeletion', 'acknowledgeLimits']);
         if (typeof payload.token !== 'string' || !/^[a-f0-9]{64}$/.test(payload.token)) throw new DeleteError('BAD_REQUEST', 'Invalid confirmation. / 无效的确认。');
         return { ok: true, value: await core.remove(payload, peer.id, combined) };
       }

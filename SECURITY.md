@@ -8,9 +8,15 @@ Version 0.1.x is a narrowly scoped JSONL log-maintenance plugin for DSH 0.2.2-rc
 
 Host plugins execute outside a session's workspace sandbox. Inspect the code before installation. This plugin contains no external network requests, subprocess execution, install scripts, telemetry or extra model calls. Communication uses DSH's authenticated Connection RPC channel and an additional `owner` principal check.
 
-The confirmation dialog is a human safety interlock, not a security boundary against a malicious installed Host plugin or an already-compromised authenticated owner page. The Host verifies token, peer binding, exact ID, typed confirmation, scope acknowledgment, current storage identity, exclusive writer ownership, and live/archive state.
+The confirmation dialog is a human safety interlock, not a security boundary against a malicious installed Host plugin or an already-compromised authenticated owner page. The Host verifies token, peer binding, exact ID, strict boolean `confirmDeletion: true` sent by the explicit final delete action, scope acknowledgment, current storage identity, exclusive writer ownership, and live/archive state.
 
 Local same-user adversarial filesystem mutation cannot be eliminated with Node path-based unlink. Symlinks/junctions, hardlinks, unexpected layouts/files and preflight drift are rejected, but there remains a check/use window against an attacker who can rename directories under the same user. Do not use this as a privileged service or on hostile/shared/network storage. Close other processes sharing the store.
+
+## Lifecycle admission
+
+Preview/preparation accepts only unloaded sessions but does not require manual archival and never mutates lifecycle state. After explicit human confirmation and a fresh fingerprint check, the plugin calls public `workspaceRegistry.archiveSession(id)` without `stopActivity`, then rechecks liveness/fingerprint before acquiring the write lock. Active work is rejected rather than cancelled. A failed later step can leave the target archived; archival is not rolled back automatically. The final unlink loop still checks the durable archive gate and liveness for every file.
+
+Current and idle loaded sessions remain unsupported: the installed DSH only gives `AgentHandle.dispose()` to the creating owner and exposes no public Controller unload method. The plugin does not access private lifecycle fields or dispose another consumer's Agent. Switching away alone need not unload a session; restart DSH without reopening the target when necessary. A running current conversation can never be deleted by this operation.
 
 ## Availability and partial failures
 

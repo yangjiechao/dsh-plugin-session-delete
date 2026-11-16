@@ -50,6 +50,7 @@ async function fixture(t, { generations = GENERATIONS, unlink, open, close } = {
   const deps = {
     persistence, isArchived: requested => { assert.equal(requested, id); return state.archived; },
     isLive: requested => { assert.equal(requested, id); return state.live; },
+    archive: async requested => { assert.equal(requested, id); state.archives = (state.archives || 0) + 1; state.archived = true; },
     liveHeaders: () => state.liveHeaders, workspaces: () => [workspace], warn: message => state.warnings.push(message),
   };
   const core = new SessionDeletion(deps, { async unlink(target) {
@@ -69,7 +70,7 @@ async function fixture(t, { generations = GENERATIONS, unlink, open, close } = {
   });
   const request = async (peer = 'owner-A') => {
     const prepared = await core.prepare(id, peer);
-    return { sessionId: id, token: prepared.token, confirmText: 'DELETE', acknowledgeLimits: true };
+    return { sessionId: id, token: prepared.token, confirmDeletion: true, acknowledgeLimits: true };
   };
   return { temporary, root, dir, id, bodies, beforeLock, state, core, deps, persistence, workspace, request };
 }
@@ -95,6 +96,36 @@ test('preview and preparation do not write, lock, detach, or return preview auth
   assert.equal(f.state.opens, 0); assert.equal(f.state.closes, 0); assert.deepEqual(f.state.detaches, []);
 });
 
+test('unarchived cold session previews read-only and archives only after explicit confirmation', async t => {
+  const f = await fixture(t); f.state.archived = false;
+  const request = await f.request();
+  assert.equal(f.state.archived, false); assert.equal(f.state.archives || 0, 0);
+  await assert.rejects(f.core.remove({ ...request, acknowledgeLimits: false }, 'owner-A'), rejection('CONFIRMATION_REQUIRED'));
+  assert.equal(f.state.archived, false); assert.equal(f.state.opens, 0);
+  const result = await f.core.remove(request, 'owner-A');
+  assert.equal(result.deleted, true); assert.equal(f.state.archived, true); assert.equal(f.state.archives, 1);
+});
+
+test('automatic archive refuses active work without locking or unlinking', async t => {
+  const f = await fixture(t); f.state.archived = false;
+  f.deps.archive = async () => { throw Object.assign(new Error('active work'), { code: 'workspace/session-active' }); };
+  await assert.rejects(f.core.remove(await f.request(), 'owner-A'));
+  assert.equal(f.state.archived, false); assert.equal(f.state.opens, 0); assert.deepEqual(f.state.unlinks, []);
+});
+
+test('archive success followed by writer failure retains archive without unlinking', async t => {
+  const f = await fixture(t, { open() { throw new Error('writer busy'); } }); f.state.archived = false;
+  await assert.rejects(f.core.remove(await f.request(), 'owner-A'));
+  assert.equal(f.state.archived, true); assert.equal(f.state.archives, 1); assert.deepEqual(f.state.unlinks, []);
+});
+
+test('activation during automatic archive aborts before write-open', async t => {
+  const f = await fixture(t); f.state.archived = false;
+  f.deps.archive = async () => { f.state.archived = true; f.state.live = true; };
+  await assert.rejects(f.core.remove(await f.request(), 'owner-A'), rejection('LIVE_SESSION'));
+  assert.equal(f.state.opens, 0); assert.deepEqual(f.state.unlinks, []);
+});
+
 test('successful deletion removes generations oldest first/current last, preserves lock and receipt', async t => {
   const f = await fixture(t);
   const result = await f.core.remove(await f.request(), 'owner-A');
@@ -113,7 +144,6 @@ test('successful deletion removes generations oldest first/current last, preserv
 });
 
 for (const [label, configure, code] of [
-  ['unarchived session', f => { f.state.archived = false; }, 'NOT_ARCHIVED'],
   ['live Agent/Session', f => { f.state.live = true; }, 'LIVE_SESSION'],
   ['stored child/fork', f => { f.state.children.push({ header: { id: 'child', parentSession: f.id } }); }, 'HAS_CHILDREN'],
   ['live child/fork', f => { f.state.liveHeaders.push({ id: 'child', parentSession: f.id }); }, 'HAS_CHILDREN'],
@@ -218,7 +248,7 @@ test('confirmation token is peer-bound and expires', async t => {
 test('unknown token and missing explicit confirmation never open writer', async t => {
   const f = await fixture(t); const req = await f.request();
   await assert.rejects(f.core.remove({ ...req, token: 'a'.repeat(64) }, 'owner-A'), rejection('EXPIRED'));
-  for (const fields of [{ confirmText: '' }, { confirmText: 'delete' }, { acknowledgeLimits: false }, { acknowledgeLimits: undefined }]) {
+  for (const fields of [{ confirmDeletion: false }, { confirmDeletion: undefined }, { confirmDeletion: 'true' }, { confirmDeletion: 1 }, { acknowledgeLimits: false }, { acknowledgeLimits: undefined }]) {
     await assert.rejects(f.core.remove({ ...req, ...fields }, 'owner-A'), rejection('CONFIRMATION_REQUIRED'));
   }
   assert.equal(f.state.opens, 0); assert.deepEqual(f.state.unlinks, []);
@@ -318,7 +348,7 @@ function registration(f) {
     agents: { get: () => undefined },
     workspaceRegistry: { get archivedSessionIds() { return f.state.archived ? [f.id] : []; }, list: () => [f.workspace] },
     logger: { warn: (...args) => warnings.push(args) },
-    connection: { rpc: { handle(channel, fn) { handlers.set(channel, fn); } } },
+    connection: { register(owner, channel, fn) { assert.equal(owner, ctx); handlers.set(channel, fn); } },
     effect(fn) { effects.push(fn()); }, on(event, fn) { events.set(event, fn); },
     inject(names, fn) { assert.deepEqual(names, ['tools']); fn({ tools: { register(tool) { tools.push(tool); } } }); },
   };
@@ -355,6 +385,12 @@ test('RPC validates shape, confirmation and unknown operation; owner can prepare
     const result = await reg.rpc(endpoint, payload, reg.signal, reg.peer); assert.equal(result.ok, false); assert.equal(result.error.code, 'BAD_REQUEST');
   }
   const prepared = await reg.rpc('prepare', { sessionId: f.id }, reg.signal, reg.peer); assert.equal(prepared.ok, true);
-  const removed = await reg.rpc('remove', { sessionId: f.id, token: prepared.value.token, confirmText: 'DELETE' }, reg.signal, reg.peer);
+  const legacy = await reg.rpc('remove', { sessionId: f.id, token: prepared.value.token, confirmText: 'DELETE', acknowledgeLimits: true }, reg.signal, reg.peer);
+  assert.equal(legacy.ok, false); assert.equal(legacy.error.code, 'BAD_REQUEST');
+  for (const confirmDeletion of [undefined, false, 'true', 1, null]) {
+    const invalid = await reg.rpc('remove', { sessionId: f.id, token: prepared.value.token, confirmDeletion, acknowledgeLimits: true }, reg.signal, reg.peer);
+    assert.equal(invalid.ok, false); assert.equal(invalid.error.code, 'CONFIRMATION_REQUIRED');
+  }
+  const removed = await reg.rpc('remove', { sessionId: f.id, token: prepared.value.token, confirmDeletion: true }, reg.signal, reg.peer);
   assert.equal(removed.ok, false); assert.equal(removed.error.code, 'CONFIRMATION_REQUIRED'); assert.equal(f.state.opens, 0);
 });

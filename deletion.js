@@ -69,8 +69,7 @@ export class SessionDeletion {
   }
   async conditions(id, signal) {
     signal?.throwIfAborted();
-    if (!this.deps.isArchived(id)) deny('NOT_ARCHIVED', 'Archive the session first. / 请先归档该会话。');
-    if (this.deps.isLive(id)) deny('LIVE_SESSION', 'Session is loaded. Switch away, archive it, then restart DSH if necessary. Do not reopen it before deletion. / 会话仍在内存中；请切换会话、归档，必要时重启 DSH 后再删，不要重新打开它。');
+    if (this.deps.isLive(id)) deny('LIVE_SESSION', 'Session is loaded; this DSH version has no public safe unload API. Switch to another session, restart DSH, and delete from the menu without reopening this session. / 会话仍在内存中；当前 DSH 无公开安全卸载接口。请切换到其他会话并重启 DSH，再从菜单删除，不要重新打开目标会话；无需手动归档。');
     const snapshots = await this.deps.persistence.list({ signal });
     if (snapshots.some(s => s.header.parentSession === id) || this.deps.liveHeaders().some(h => h.parentSession === id)) {
       deny('HAS_CHILDREN', 'This session has child sessions or forks. Delete the children first; deletion is not recursive. / 此会话有子会话或分支，请先处理它们；不会级联删除。');
@@ -158,7 +157,7 @@ export class SessionDeletion {
     if (!approval || approval.id !== id || approval.peerId !== peerId || approval.expiresAt <= Date.now()) {
       deny('EXPIRED', 'Confirmation expired. Reopen the warning dialog. / 确认已失效，请重新打开警告框。');
     }
-    if (request.confirmText !== 'DELETE' || request.acknowledgeLimits !== true) deny('CONFIRMATION_REQUIRED', 'Explicit confirmation is required. / 必须明确确认删除。');
+    if (request.confirmDeletion !== true || request.acknowledgeLimits !== true) deny('CONFIRMATION_REQUIRED', 'Explicit confirmation is required. / 必须明确确认删除。');
     this.tokens.delete(request.token); // Single use, including failed attempts.
     this.deleting.add(id);
     let handle, removed = 0, bytes = 0, completed = false;
@@ -166,6 +165,17 @@ export class SessionDeletion {
     try {
       let plan = await this.inspect(id, signal);
       if (plan.fingerprint !== approval.fingerprint) deny('CHANGED', 'Log changed since preview. / 预览后日志发生变化，请重新确认。');
+      // Lifecycle changes begin only after human confirmation and fingerprint validation.
+      // Archive without stopActivity: public admission rejects running jobs/turns;
+      // never force-cancel work or tear down somebody else's owned Agent handle.
+      if (!this.deps.isArchived(id)) {
+        if (typeof this.deps.archive !== 'function') deny('UNSUPPORTED', 'Automatic archive is unavailable. / 当前宿主不支持自动归档。');
+        try { await this.deps.archive(id); }
+        catch { deny('ARCHIVE_FAILED', 'Automatic archive was refused or failed. Running work is never force-stopped; inspect the session before retrying. / 自动归档被拒绝或失败。不会强制停止运行中的任务；请检查目标会话后再试。'); }
+      }
+      if (!this.deps.isArchived(id)) deny('CHANGED', 'Archive admission did not complete. / 自动归档未完成。');
+      plan = await this.inspect(id, signal);
+      if (plan.fingerprint !== approval.fingerprint) deny('CHANGED', 'Session changed during archive. / 自动归档期间会话发生变化，请重新确认。');
       // Current-format write-open acquires DSH's normal in-process claim and cross-process lock.
       handle = await this.deps.persistence.open(id, 'write', { signal });
       plan = await this.inspect(id, signal);
