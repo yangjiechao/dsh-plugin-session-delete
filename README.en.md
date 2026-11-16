@@ -10,6 +10,8 @@ Adds **Permanently delete logs…** to a DeepSeek Harness session menu. A warnin
 
 Built for **DSH 0.2.2-rc.3, current Session V4**. The manifest deliberately gates `>=0.2.2-rc.3 <0.2.3-0`. Supports the local JSONL backend with raw or Zstandard logs. No automatic historical migration, mixed encodings, future formats, subagent sessions, parent sessions with known children, network filesystems, or distributed deployment support.
 
+The lower bound is not merely a development label: published `0.2.1-rc.3` lacks `SessionPersistenceSnapshot.location` (used to locate and validate the actual log) and `workspace/session-unarchiving` (used to reject lifecycle re-entry during deletion). Keep the tested `0.2.2-rc.3` lower bound; this does not claim those APIs first appeared in that exact RC. A missing location is rejected, never replaced with a guessed filesystem path.
+
 Install from GitHub with `plugin_manager action=install_bundle target=github:yangjiechao/dsh-plugin-session-delete`, or clone/download this repository and use **Settings → Plugins → Add plugin** to install its absolute directory. No install scripts or cloud account. Refresh your existing DSH page afterwards; honor any restart-required result.
 
 ## Use

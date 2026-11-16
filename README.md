@@ -10,6 +10,8 @@
 
 针对 **DeepSeek Harness 0.2.2-rc.3 / Session format V4** 开发，manifest 限制为 `>=0.2.2-rc.3 <0.2.3-0`。仅适用于 Web GUI 及本地磁盘 JSONL 后端（raw 和 Zstandard）。不支持远程或不可靠锁文件系统、混合编码、旧格式自动迁移、未来格式、子智能体日志、带子会话/分支的父会话。其他 DSH 版本必须重新验证，不要绕过版本限制。
 
+该下限不只是开发环境标签：对比 npm 发布的 `0.2.1-rc.3` 源码，旧版 `SessionPersistenceSnapshot` 没有本插件用于定位并校验实际日志的 `location`，`WorkspaceRegistry` 也没有本插件用于拒绝删除期间重新打开会话的 `workspace/session-unarchiving` 生命周期事件。保留 `0.2.2-rc.3` 下限；它是当前已验证、包含所需契约的版本，不声称这两个能力恰好首次在该 RC 引入。缺少 `location` 时插件会拒绝操作，不会猜测日志路径。
+
 ## 安装
 
 下载或克隆 [公开仓库](https://github.com/yangjiechao/dsh-plugin-session-delete)，在 **设置 → 插件 → 添加插件** 中安装本地目录；也可以直接让 Agent 使用：

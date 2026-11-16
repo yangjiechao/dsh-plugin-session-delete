@@ -17,6 +17,14 @@
 - npm distribution file-list inspection, including exported locales and self-contained SVG icon; the icon parses as XML with the intended viewBox.
 - Static UI/UX expert review. No production deletion is exercised through the UI.
 
+## Compatibility audit (2026-11-16)
+
+- Compared published npm `0.2.1-rc.3` sources with installed `0.2.2-rc.3`: old `dsh-session-persistence/lib/types/index.d.ts` has no snapshot `location`, whereas the new contract provides backend-resolved per-session artifact location. The plugin requires that metadata and deliberately refuses missing locations rather than guessing a path.
+- Old `dsh-workspace/lib/types/index.d.ts` and its implementation have no `workspace/session-unarchiving`; the new implementation awaits this event before removing archive state. The plugin's listener uses this admission point to prevent lifecycle re-entry during deletion. Its absence is a real safety-contract gap, even if V4 and write-open already exist.
+- Keep manifest `>=0.2.2-rc.3 <0.2.3-0`. This is the tested sufficient baseline, not a claim that the exact RC first introduced either API. No version exemption or profile change was made.
+- Added a regression for old-style snapshots with no `location`: preparation returns `UNSUPPORTED`, opens no writer and leaves the directory unchanged. Existing guards already fail closed; no additional runtime fallback is needed.
+- Re-ran actual installed `0.2.2-rc.3` JSONL integrations (none/zstd): both pass using disposable logs. Node in this audit: v25.5.0. Historical `0.2.1-rc.3` is not declared supported or tested for destructive operations.
+
 ## Not established by these tests
 
 - A screenshot or visual approval of the installed dialog/icon in light/dark themes.

@@ -131,6 +131,20 @@ for (const [label, configure, code] of [
   });
 }
 
+test('old persistence snapshot without location fails closed before write-open', async t => {
+  const f = await fixture(t);
+  const stat = f.persistence.stat;
+  f.persistence.stat = async (...args) => {
+    const snapshot = await stat(...args);
+    const { location: _location, ...oldSnapshot } = snapshot;
+    return oldSnapshot;
+  };
+  const before = await directorySnapshot(f.dir);
+  await assert.rejects(f.core.prepare(f.id, 'owner-A'), error => error.code === 'UNSUPPORTED');
+  assert.equal(f.state.opens, 0);
+  assert.deepEqual(await directorySnapshot(f.dir), before);
+});
+
 test('refuses missing session without opening writer', async t => {
   const f = await fixture(t); f.state.location = path.join(f.dir, 'missing.v4.jsonl.zstd');
   await assert.rejects(f.core.preview(f.id), rejection('NOT_FOUND')); assert.equal(f.state.opens, 0);
